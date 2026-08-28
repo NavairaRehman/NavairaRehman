@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=26&pause=1000&color=6B5CE0&center=true&vCenter=true&width=560&lines=Hi%2C+I'm+Navaira+%F0%9F%A7%AC;ML+across+generative+models%2C+biology+%26+LLMs;Co-founder+%40GeMorph" alt="Typing SVG" />
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=26&pause=1000&color=FFA657&center=true&vCenter=true&width=560&lines=Hi%2C+I'm+Navaira+%F0%9F%A7%AC;Co-founder+%40GeMorph;Deep+Learning+%C2%B7+Gen+AI+%C2%B7+Computational+Bio" alt="Typing SVG" />
 
 </div>
 
 <br>
 
-### 🧬 currently
+### 🧬 Currently
 
 Co-founding **[GeMorph](https://github.com/GeMorph)** — we reconstruct 3D facial models directly from DNA, for forensic and law-enforcement use.
 

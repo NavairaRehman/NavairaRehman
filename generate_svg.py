@@ -4,9 +4,6 @@ Generates a neofetch-style terminal card for a GitHub profile README:
 ASCII-art avatar on the left, dotted key/value stats on the right.
 Pulls live data from the GitHub REST API.
 
-Uses explicit textLength on every line so column alignment stays exact
-regardless of which monospace font the renderer substitutes.
-
 Usage:
     python3 generate_svg.py <username> <output_path>
 """
@@ -21,37 +18,38 @@ from io import BytesIO
 
 from PIL import Image
 
-# ---- theme -----------------------------------------------------------
+# ---- theme -------------------------------------------------------------
 BG = "#0d1117"
 BORDER = "#30363d"
-LABEL = "#c9d1d9"
-VALUE = "#a58cff"
-HEADER = "#8f7cff"
-DOT = "#484f58"
-TITLE_DOT = "#6e7681"
-ASCII_FILL = "#8f7cff"
+SECTION = "#c9d1d9"     # section header text, e.g. "- navaira@github"
+DASH = "#30363d"        # dashes after section header
+LABEL = "#ffa657"       # ". Role:" style keys (orange)
+DOT = "#484f58"         # dot leaders
+VALUE = "#a5d6ff"       # values (light blue)
+TITLE_DOT = "#6e7681"   # window titlebar text
+ASCII_FILL = "#8b949e"  # ascii avatar art
 
-# ---- static config: things that aren't in the GitHub API -------------
+# ---- static config: things that aren't in the GitHub API ---------------
 ROLE = "Co-founder @ GeMorph"
 FOCUS = "Deep Learning, Gen AI, LLMs, Computational Bio/Bioinformatics"
 ML_STACK = "Transformers, LoRA/PEFT, GANs, Diffusion, Hyperbolic GNNs"
 TOOLS = "PyTorch, TensorFlow, GCP"
 EMAIL = "navaira@gemorph.com"
 WEBSITE = "gemorph.com"
-BIRTHDATE = "2003-06-18"  # YYYY-MM-DD
+ORG = "GeMorph"
 
 ASCII_RAMP = " .:-=+*#%@"
 
 FONT = "Consolas, 'Fira Code', 'DejaVu Sans Mono', monospace"
 FONT_SIZE = 13
-CHAR_W = FONT_SIZE * 0.6          # enforced via textLength, not relied on for real metrics
 LINE_H = 23
 
-LABEL_COL_CHARS = 24    # ". Languages.Programming:" etc
-DOTS_COL_CHARS = 12
-ASCII_FONT_SIZE = 8.6
-ASCII_CHAR_W = ASCII_FONT_SIZE * 0.6
-ASCII_LINE_H = 10.4
+RIGHT_COL_CHARS = 100   # total characters spanned by the right-hand block (label+dots+value area)
+LABEL_VALUE_GAP_CHARS = 1
+
+ASCII_FONT_SIZE = 4.9
+ASCII_CHAR_W = ASCII_FONT_SIZE * 1.0   # monospace cell width used purely for canvas sizing
+ASCII_LINE_H = 5.3
 
 
 def api_get(url, token=None):
@@ -99,16 +97,9 @@ def account_age(created_at):
     return f"{years}y {months}m"
 
 
-def compute_age(birthdate_str):
-    born = datetime.strptime(birthdate_str, "%Y-%m-%d").date()
-    today = datetime.now(timezone.utc).date()
-    age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-    return age
-
-
-def avatar_to_ascii(avatar_bytes, cols=44):
+def avatar_to_ascii(avatar_bytes, cols=100):
     img = Image.open(BytesIO(avatar_bytes)).convert("L")
-    aspect_correction = 0.5
+    aspect_correction = 0.48
     rows = max(1, int(cols * img.height / img.width * aspect_correction))
     img = img.resize((cols, rows))
     pixels = list(img.getdata())
@@ -126,104 +117,104 @@ def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def text_fixed(x, y, content, size, fill, weight="400", width=None, anchor="start"):
-    """A <text> element whose rendered width is pinned via textLength."""
-    attrs = f'x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill}" font-weight="{weight}" text-anchor="{anchor}"'
-    if width:
-        attrs += f' textLength="{width:.1f}" lengthAdjust="spacingAndGlyphs"'
-    return f'<text {attrs} xml:space="preserve">{esc(content)}</text>'
+def text_el(x, y, content, size, fill, anchor="start", xml_space=True):
+    space = ' xml:space="preserve"' if xml_space else ""
+    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{fill}" text-anchor="{anchor}"{space}>{esc(content)}</text>'
 
 
 def build_svg(username, user, repos, ascii_grid, avatar_url):
     langs = top_languages(repos)
     age = account_age(user["created_at"])
+    repo_count = user.get("public_repos", len(repos))
+    top_lang = langs[0] if langs else "\u2014"
+    lang_list = ", ".join(langs) if langs else "\u2014"
 
-    ascii_cols = max((len(r) for r in ascii_grid), default=0)
-    ascii_px_w = ascii_cols * ASCII_CHAR_W
-    ascii_px_h = len(ascii_grid) * ASCII_LINE_H
-
-    pad = 24
-    gap = 40
-    label_col_w = LABEL_COL_CHARS * CHAR_W
-    dots_col_w = DOTS_COL_CHARS * CHAR_W
-    value_col_w = 62 * CHAR_W
-
-    right_w = label_col_w + dots_col_w + value_col_w
-    width = int(pad * 2 + ascii_px_w + gap + right_w)
-
+    # ---- canvas geometry (mirrors the reference card's proportions) ----
+    width = 1079
     header_h = 44
-    top = header_h + pad
+    pad = 24
+    ascii_x = 24
+    ascii_top = 62.0
+    right_x = 328
 
-    avatar_size = 40
     body = []
 
-    # ASCII art
-    for i, row in enumerate(ascii_grid):
-        y = top + (i + 1) * ASCII_LINE_H
-        body.append(text_fixed(pad, y, row, ASCII_FONT_SIZE, ASCII_FILL, width=ascii_px_w))
-        body[-1] = body[-1].replace('fill="#8f7cff"', f'fill="{ASCII_FILL}" opacity="{0.35 + 0.55 * (i % 5) / 5:.2f}"')
+    # ASCII avatar block, flat gray, one <text> per row
+    y = ascii_top
+    for row in ascii_grid:
+        body.append(text_el(ascii_x, round(y, 1), row, ASCII_FONT_SIZE, ASCII_FILL))
+        y += ASCII_LINE_H
+    ascii_bottom = y
 
-    rx = pad + ascii_px_w + gap
-    ry = [top]  # mutable box so nested funcs can update
+    def dashes_to_fill(prefix_text, total_chars=58):
+        n = max(0, total_chars - len(prefix_text))
+        return "-" * n
+
+    def dots_to_fill(label_text, total_chars=25):
+        n = max(1, total_chars - len(label_text))
+        return "." * n
+
+    ry = [68]  # first section header baseline, matches reference
 
     def section(title):
-        y = ry[0]
-        body.append(text_fixed(rx, y, f"- {title} ", 13, LABEL, weight="700"))
-        dash_w = right_w - (len(title) + 3) * CHAR_W
-        if dash_w > 0:
-            body.append(
-                text_fixed(rx + (len(title) + 3) * CHAR_W, y, "-" * 40, 13, BORDER, width=dash_w)
-            )
+        yy = ry[0]
+        prefix = f"- {title} "
+        body.append(
+            f'<text x="{right_x}" y="{yy}" font-size="13" text-anchor="start" xml:space="preserve">'
+            f'<tspan fill="{SECTION}" font-weight="700">{esc(prefix)}</tspan>'
+            f'<tspan fill="{DASH}" font-weight="400">{dashes_to_fill(prefix)}</tspan></text>'
+        )
         ry[0] += LINE_H
 
     def field(label, value):
-        y = ry[0]
+        yy = ry[0]
         label_text = f". {label}:"
-        body.append(text_fixed(rx, y, label_text, FONT_SIZE, HEADER, weight="700", width=label_col_w))
-        body.append(text_fixed(rx + label_col_w, y, "." * DOTS_COL_CHARS, FONT_SIZE, DOT, width=dots_col_w))
-        body.append(text_fixed(rx + label_col_w + dots_col_w + CHAR_W * 0.6, y, str(value), FONT_SIZE, VALUE, weight="600"))
+        body.append(
+            f'<text x="{right_x}" y="{yy}" font-size="13" text-anchor="start" xml:space="preserve">'
+            f'<tspan fill="{LABEL}" font-weight="700">{esc(label_text)}</tspan>'
+            f'<tspan fill="{DOT}" font-weight="400">{dots_to_fill(label_text)}</tspan>'
+            f'<tspan fill="{VALUE}" font-weight="600"> {esc(value)}</tspan></text>'
+        )
         ry[0] += LINE_H
 
     section("navaira@github")
     field("Role", ROLE)
     field("Focus", FOCUS)
     field("Languages.ML", ML_STACK)
-    field("Languages.Programming", ", ".join(langs) if langs else "—")
+    field("Languages.Programming", lang_list)
     field("Tools", TOOLS)
     ry[0] += 10
 
     section("GitHub Stats")
-    field("Age", compute_age(BIRTHDATE))
-    field("Repos", user.get("public_repos", len(repos)))
+    field("Repos", repo_count)
     field("Account age", age)
-    field("Top language", langs[0] if langs else "—")
+    field("Top language", top_lang)
     ry[0] += 10
 
     section("Contact")
     field("GitHub", f"github.com/{username}")
-    field("Org", f"github.com/GeMorph · {WEBSITE}")
+    field("Org", f"github.com/{ORG} \u00b7 {WEBSITE}")
     field("Email", EMAIL)
-    ry[0] += 20
+    ry[0] += 30
 
-    # ---- now that layout is known, compute final canvas height --------
-    height = int(max(top + ascii_px_h, ry[0]) + pad)
+    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d UTC")
+    footer_y = ry[0]
+    body.append(text_el(right_x, footer_y, f"last synced {updated}", 9.5, DOT))
 
-    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    body.append(text_fixed(rx, height - pad + 8, f"last synced {updated}", 9.5, DOT))
+    height = int(max(ascii_bottom + pad, footer_y + pad))
 
+    avatar_size = 40
     chrome = [
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'<svg width="{int(width*0.71)}" height="{int(height*0.71)}" viewBox="0 0 {width} {height}" '
         f'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" font-family="{FONT}">',
         f'<rect width="{width}" height="{height}" rx="12" fill="{BG}" stroke="{BORDER}"/>',
-        f'<circle cx="{pad}" cy="{pad}" r="6" fill="#ff5f56"/>',
-        f'<circle cx="{pad+18}" cy="{pad}" r="6" fill="#ffbd2e"/>',
-        f'<circle cx="{pad+36}" cy="{pad}" r="6" fill="#27c93f"/>',
-        text_fixed(pad + 56, pad + 5, f"{username} / README.md", 13, TITLE_DOT),
-        f'<line x1="{pad}" y1="{pad+20}" x2="{width-pad}" y2="{pad+20}" stroke="{BORDER}"/>',
-        f'<defs><clipPath id="avatarClip"><circle cx="{width - pad - avatar_size/2}" cy="{pad}" r="{avatar_size/2}"/></clipPath></defs>',
-        f'<image href="{esc(avatar_url)}" x="{width - pad - avatar_size}" y="{pad - avatar_size/2}" '
-        f'width="{avatar_size}" height="{avatar_size}" clip-path="url(#avatarClip)" preserveAspectRatio="xMidYMid slice"/>',
-        f'<circle cx="{width - pad - avatar_size/2}" cy="{pad}" r="{avatar_size/2}" fill="none" stroke="{HEADER}" stroke-width="1.5"/>',
+        f'<circle cx="24" cy="24" r="6" fill="#ff5f56"/><circle cx="42" cy="24" r="6" fill="#ffbd2e"/><circle cx="60" cy="24" r="6" fill="#27c93f"/>',
+        text_el(80, 29, f"{username} / README.md", 13, TITLE_DOT),
+        f'<line x1="24" y1="44" x2="{width-24}" y2="44" stroke="{BORDER}"/>',
+        f'<defs><clipPath id="avatarClip"><circle cx="{width-44}" cy="24" r="20"/></clipPath></defs>',
+        f'<image href="{esc(avatar_url)}" x="{width-64}" y="4" width="{avatar_size}" height="{avatar_size}" '
+        f'clip-path="url(#avatarClip)" preserveAspectRatio="xMidYMid slice"/>',
+        f'<circle cx="{width-44}" cy="24" r="20" fill="none" stroke="#ffa657" stroke-width="1.5"/>',
     ]
 
     return "".join(chrome) + "".join(body) + "</svg>"
@@ -240,7 +231,7 @@ def main():
     user = api_get(f"https://api.github.com/users/{username}", token)
     repos = fetch_all_repos(username, token)
     avatar_bytes = fetch_bytes(user["avatar_url"])
-    ascii_grid = avatar_to_ascii(avatar_bytes, cols=44)
+    ascii_grid = avatar_to_ascii(avatar_bytes, cols=100)
 
     svg = build_svg(username, user, repos, ascii_grid, user["avatar_url"])
     with open(output_path, "w") as f:
